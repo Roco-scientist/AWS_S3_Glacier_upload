@@ -76,17 +76,18 @@ echo "Combining hashes"
 HASH1="None"
 HASH2="None"
 HASHCOMBO="None"
+# TODO fix below.  Needs to be a tree hash, not a sequential hash
 for HASH in $FILE_HASH_FOLDER/chunk_hash*; do
-	if [ $HASH1 = "None" ]; then
-		if [ $HASH2 = "None" ]; then
-			HASH2=$HASH
-		else
+	if [ $HASH2 = "None" ]; then
+		if [ $HASH1 = "None" ]; then
 			HASH1=$HASH
+		else
+			HASH2=$HASH
 			HASH2_BASE="$(basename -- $HASH2)"
 			HASH1_BASE="$(basename -- $HASH1)"
-			HASH1_END=${HASH1_BASE: -2}
-			HASHCOMBO=$FILE_COMBINED_HASH_FOLDER/$HASH2_BASE"_"$HASH1_END
-			cat $HASH2 $HASH1 > $HASHCOMBO
+			HASH2_END=${HASH2_BASE: -2}
+			HASHCOMBO=$FILE_COMBINED_HASH_FOLDER/$HASH1_BASE"_"$HASH2_END
+			cat $HASH1 $HASH2 > $HASHCOMBO
 			openssl dgst -sha256 -binary $HASHCOMBO > $HASHCOMBO"_hashed"
 			if [ $TEST = true ];then
 				echo command:
