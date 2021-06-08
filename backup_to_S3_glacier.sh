@@ -1,4 +1,9 @@
 #!/bin/bash
+
+
+####################
+# Variables to change
+####################
 CHUNK_SIZE=1073741824
 FILE_HASH_FOLDER=/tmp/hash_files
 FILE_COMBINED_HASH_FOLDER=/tmp/hashed_files_combined
@@ -11,7 +16,9 @@ TEST=true
 NOT_ALREADY_SPLIT=false
 NOT_TARRED=false
 
+####################
 # tar archive pictures
+####################
 if [ $TEST = true ];then
 	echo command:
 	echo tar -cf $ARCHIVE_FILE $ARCHIVE_FOLDER 
@@ -20,7 +27,9 @@ if [ $NOT_TARRED = true ]; then
 	tar -cf $ARCHIVE_FILE $ARCHIVE_FOLDER 
 fi
 
+####################
 # split into chunks
+####################
 echo "Splitting file into $CHUNK_SIZE byte chunks"
 mkdir $FILE_CHUNK_FOLDER
 mkdir $FILE_HASH_FOLDER
@@ -33,7 +42,9 @@ if [ $NOT_ALREADY_SPLIT = true ];then
 	split -b $CHUNK_SIZE --verbose $ARCHIVE_FILE $FILE_CHUNK_FOLDER/chunk
 fi
 
+####################
 # initiate multipart upload
+####################
 if [ $TEST = true ];then
 	echo command:
 	echo aws glacier initiate-multipart-upload --account-id - --archive-description $ARCHIVE_DESCRIPTION --part-size $CHUNK_SIZE --vault-name $VAULT
@@ -43,7 +54,9 @@ fi
 
 UPLOADID=""
 
+####################
 # upload chunked files and hash
+####################
 echo "Uploading and hashing files"
 CHUNK_START=0
 CHUNK_END=0
@@ -71,7 +84,9 @@ for FILE in $FILE_CHUNK_FOLDER/chunk*; do
 	let "NUMBER+=1"
 done
 
+####################
 # combine hashes
+####################
 echo "Combining hashes"
 HASH1="None"
 HASH2="None"
@@ -112,10 +127,12 @@ for HASH in $FILE_HASH_FOLDER/chunk_hash*; do
 	fi
 done
 TREEHASH_START=$(openssl dgst -sha256 $HASHCOMBO)
-TREEHASH=$(cut -d " " -f2 <<< "$TREEHASH_START")
+TREEHASH=$(cut -d " " -f 2 <<< "$TREEHASH_START")
 echo $TREEHASH
 
+####################
 # complete upload
+####################
 echo "Completing upload with combined hashes"
 if [ $TEST = true ];then
 	echo command:
@@ -124,7 +141,9 @@ else
 	aws glacier complete-multipart-upload --checksum $TREEHASH --archive-size $CHUNK_END --upload-id $UPLOADID --account-id - --vault-name $VAULT
 fi
 
+####################
 # remove hash and chunk files
+####################
 echo "Cleaning up and deleting files"
 if [ $TEST = false ];then
 	rm -r $FILE_CHUNK_FOLDER
