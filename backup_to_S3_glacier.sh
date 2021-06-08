@@ -1,16 +1,22 @@
 #!/bin/bash
 CHUNK_SIZE=1073741824
 FILE_HASH_FOLDER=/tmp/hash_files
-FILE_COMBINED_HASH_FOLDER=/tmp/hashe_files_combined
+FILE_COMBINED_HASH_FOLDER=/tmp/hashed_files_combined
 FILE_CHUNK_FOLDER=/tmp/chunked_files
 VAULT=pictures.backup
-ARCHIVE_DESCRIPTION="Backup of pictures" 
+ARCHIVE_DESCRIPTION='"Backup of pictures"' 
 ARCHIVE_FOLDER=/media/main/Pictures
 ARCHIVE_FILE=/media/main/pictures.tar
 TEST=true
+NOT_ALREADY_SPLIT=false
+NOT_TARRED=false
 
 # tar archive pictures
-if [ $TEST = false ];then
+if [ $TEST = true ];then
+	echo command:
+	echo tar -cf $ARCHIVE_FILE $ARCHIVE_FOLDER 
+fi
+if [ $NOT_TARRED = true ]; then
 	tar -cf $ARCHIVE_FILE $ARCHIVE_FOLDER 
 fi
 
@@ -19,7 +25,11 @@ echo "Splitting file into $CHUNK_SIZE byte chunks"
 mkdir $FILE_CHUNK_FOLDER
 mkdir $FILE_HASH_FOLDER
 mkdir $FILE_COMBINED_HASH_FOLDER
-if [ $TEST = false ];then
+if [ $TEST = true ];then
+	echo command:
+	echo split -b $CHUNK_SIZE --verbose $ARCHIVE_FILE $FILE_CHUNK_FOLDER/chunk
+fi
+if [ $NOT_ALREADY_SPLIT = true ];then
 	split -b $CHUNK_SIZE --verbose $ARCHIVE_FILE $FILE_CHUNK_FOLDER/chunk
 fi
 
@@ -54,7 +64,7 @@ for FILE in $FILE_CHUNK_FOLDER/chunk*; do
 	printf -v PADDED_NUMBER "%02d" $NUMBER
 	if [ $TEST = true ];then
 		echo command:
-		echo openssl dgst -sha256 -binary $FILE > $FILE_HASH_FOLDER/chunk_hash$PADDED_NUMBER
+		echo "openssl dgst -sha256 -binary $FILE > $FILE_HASH_FOLDER/chunk_hash$PADDED_NUMBER"
 	else
 		openssl dgst -sha256 -binary $FILE > $FILE_HASH_FOLDER/chunk_hash$PADDED_NUMBER
 	fi
@@ -78,6 +88,12 @@ for HASH in $FILE_HASH_FOLDER/chunk_hash*; do
 			HASHCOMBO=$FILE_COMBINED_HASH_FOLDER/$HASH2_BASE"_"$HASH1_END
 			cat $HASH2 $HASH1 > $HASHCOMBO
 			openssl dgst -sha256 -binary $HASHCOMBO > $HASHCOMBO"_hashed"
+			if [ $TEST = true ];then
+				echo command:
+				echo "cat $HASH2 $HASH1 > $HASHCOMBO"
+				echo command:
+				echo "openssl dgst -sha256 -binary $HASHCOMBO > $HASHCOMBO"_hashed""
+			fi
 		fi
 	else
 		HASH_BASE="$(basename -- $HASH)"
@@ -86,6 +102,12 @@ for HASH in $FILE_HASH_FOLDER/chunk_hash*; do
 		HASHCOMBO=$HASHCOMBO"_"$HASH_END
 		cat $PREVIOUS_HASHCOMBO $HASH > $HASHCOMBO
 		openssl dgst -sha256 -binary $HASHCOMBO > $HASHCOMBO"_hashed"
+		if [ $TEST = true ];then
+			echo command:
+			echo "cat $PREVIOUS_HASHCOMBO $HASH > $HASHCOMBO"
+			echo command:
+			echo "openssl dgst -sha256 -binary $HASHCOMBO > $HASHCOMBO"_hashed""
+		fi
 	fi
 done
 TREEHASH_START=$(openssl dgst -sha256 $HASHCOMBO)
