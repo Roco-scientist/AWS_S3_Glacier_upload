@@ -76,8 +76,8 @@ for FILE in $FILE_CHUNK_FOLDER/chunk*; do
 	fi
 	printf -v PADDED_NUMBER "%02d" $NUMBER
 	if [ $TEST = true ];then
-		echo command:
-		echo "openssl dgst -sha256 -binary $FILE > $FILE_HASH_FOLDER/chunk_hash$PADDED_NUMBER"
+	 	echo command:
+		# echo "openssl dgst -sha256 -binary $FILE > $FILE_HASH_FOLDER/chunk_hash$PADDED_NUMBER"
 	else
 		openssl dgst -sha256 -binary $FILE > $FILE_HASH_FOLDER/chunk_hash$PADDED_NUMBER
 	fi
@@ -91,42 +91,39 @@ echo "Combining hashes"
 HASH1="None"
 HASH2="None"
 HASHCOMBO="None"
+
+combine_then_hash () {
+	# combine_then_hash left_hash right_hash destination_folder
+	HASH1_BASE="$(basename -- $1)"
+	HASH2_END=$(sed 's/.*hash\(.*\)/\1/' <<< $2)
+	DESTINATION=$3/$HASH1_BASE"_"$HASH2_END
+	cat $1 $2 | openssl dgst -sha256 -binary > $DESTINATION
+	echo $DESTINATION
+}
+
 # TODO fix below.  Needs to be a tree hash, not a sequential hash
-for HASH in $FILE_HASH_FOLDER/chunk_hash*; do
+HASH_FILES=($FILE_HASH_FOLDER/chunk_hash*)
+for HASH in "${HASH_FILES[@]}"; do
 	if [ $HASH2 = "None" ]; then
 		if [ $HASH1 = "None" ]; then
 			HASH1=$HASH
 		else
 			HASH2=$HASH
-			HASH2_BASE="$(basename -- $HASH2)"
-			HASH1_BASE="$(basename -- $HASH1)"
-			HASH2_END=${HASH2_BASE: -2}
-			HASHCOMBO=$FILE_COMBINED_HASH_FOLDER/$HASH1_BASE"_"$HASH2_END
-			cat $HASH1 $HASH2 > $HASHCOMBO
-			openssl dgst -sha256 -binary $HASHCOMBO > $HASHCOMBO"_hashed"
+			PREVIOUS_HASHCOMBO=$(combine_then_hash $HASH1 $HASH2 $FILE_COMBINED_HASH_FOLDER)
 			if [ $TEST = true ];then
 				echo command:
-				echo "cat $HASH2 $HASH1 > $HASHCOMBO"
-				echo command:
-				echo "openssl dgst -sha256 -binary $HASHCOMBO > $HASHCOMBO"_hashed""
+				echo "cat $HASH2 $HASH1 | openssl dgst -sha256 -binary > $PREVIOUS_HASHCOMBO"
 			fi
 		fi
 	else
-		HASH_BASE="$(basename -- $HASH)"
-		HASH_END=${HASH_BASE: -2}
-		PREVIOUS_HASHCOMBO=$HASHCOMBO"_hashed"
-		HASHCOMBO=$HASHCOMBO"_"$HASH_END
-		cat $PREVIOUS_HASHCOMBO $HASH > $HASHCOMBO
-		openssl dgst -sha256 -binary $HASHCOMBO > $HASHCOMBO"_hashed"
+		PREVIOUS_HASHCOMBO=$(combine_then_hash $PREVIOUS_HASHCOMBO $HASH $FILE_COMBINED_HASH_FOLDER)
 		if [ $TEST = true ];then
 			echo command:
-			echo "cat $PREVIOUS_HASHCOMBO $HASH > $HASHCOMBO"
-			echo command:
-			echo "openssl dgst -sha256 -binary $HASHCOMBO > $HASHCOMBO"_hashed""
+			echo "cat $PREVIOUS_HASHCOMBO $HASH | openssl dgst -sha256 -binary  > $PREVIOUS_HASHCOMBO"
 		fi
 	fi
 done
-TREEHASH_START=$(openssl dgst -sha256 $HASHCOMBO)
+TREEHASH_START=$(cat $PREVIOUS_HASHCOMBO $HASH | openssl dgst -sha256)
 TREEHASH=$(cut -d " " -f 2 <<< "$TREEHASH_START")
 echo $TREEHASH
 
@@ -149,4 +146,4 @@ if [ $TEST = false ];then
 	rm -r $FILE_CHUNK_FOLDER
 	rm -r $FILE_HASH_FOLDER
 fi
-rm -r $FILE_COMBINED_HASH_FOLDER
+# rm -r $FILE_COMBINED_HASH_FOLDER
