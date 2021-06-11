@@ -1,4 +1,9 @@
 #!/bin/bash
+
+
+####################
+# Variables to change
+####################
 CHUNK_SIZE=1073741824
 FILE_HASH_FOLDER=/tmp/hash_files
 FILE_COMBINED_HASH_FOLDER=/tmp/hashed_files_combined
@@ -11,7 +16,9 @@ TEST=true
 NOT_ALREADY_SPLIT=false
 NOT_TARRED=false
 
+####################
 # tar archive pictures
+####################
 if [ $TEST = true ];then
 	echo command:
 	echo tar -cf $ARCHIVE_FILE $ARCHIVE_FOLDER 
@@ -20,7 +27,9 @@ if [ $NOT_TARRED = true ]; then
 	tar -cf $ARCHIVE_FILE $ARCHIVE_FOLDER 
 fi
 
+####################
 # split into chunks
+####################
 echo "Splitting file into $CHUNK_SIZE byte chunks"
 mkdir $FILE_CHUNK_FOLDER
 mkdir $FILE_HASH_FOLDER
@@ -33,7 +42,9 @@ if [ $NOT_ALREADY_SPLIT = true ];then
 	split -b $CHUNK_SIZE --verbose $ARCHIVE_FILE $FILE_CHUNK_FOLDER/chunk
 fi
 
+####################
 # initiate multipart upload
+####################
 if [ $TEST = true ];then
 	echo command:
 	echo aws glacier initiate-multipart-upload --account-id - --archive-description $ARCHIVE_DESCRIPTION --part-size $CHUNK_SIZE --vault-name $VAULT
@@ -43,7 +54,9 @@ fi
 
 UPLOADID=""
 
+####################
 # upload chunked files and hash
+####################
 echo "Uploading and hashing files"
 CHUNK_START=0
 CHUNK_END=0
@@ -63,7 +76,7 @@ for FILE in $FILE_CHUNK_FOLDER/chunk*; do
 	fi
 	printf -v PADDED_NUMBER "%02d" $NUMBER
 	if [ $TEST = true ];then
-		echo command:
+	 	echo command:
 		echo "openssl dgst -sha256 -binary $FILE > $FILE_HASH_FOLDER/chunk_hash$PADDED_NUMBER"
 	else
 		openssl dgst -sha256 -binary $FILE > $FILE_HASH_FOLDER/chunk_hash$PADDED_NUMBER
@@ -71,51 +84,73 @@ for FILE in $FILE_CHUNK_FOLDER/chunk*; do
 	let "NUMBER+=1"
 done
 
+####################
 # combine hashes
+####################
 echo "Combining hashes"
 HASH1="None"
 HASH2="None"
 HASHCOMBO="None"
-# TODO fix below.  Needs to be a tree hash, not a sequential hash
-for HASH in $FILE_HASH_FOLDER/chunk_hash*; do
-	if [ $HASH2 = "None" ]; then
-		if [ $HASH1 = "None" ]; then
-			HASH1=$HASH
-		else
-			HASH2=$HASH
-			HASH2_BASE="$(basename -- $HASH2)"
-			HASH1_BASE="$(basename -- $HASH1)"
-			HASH2_END=${HASH2_BASE: -2}
-			HASHCOMBO=$FILE_COMBINED_HASH_FOLDER/$HASH1_BASE"_"$HASH2_END
-			cat $HASH1 $HASH2 > $HASHCOMBO
-			openssl dgst -sha256 -binary $HASHCOMBO > $HASHCOMBO"_hashed"
-			if [ $TEST = true ];then
-				echo command:
-				echo "cat $HASH2 $HASH1 > $HASHCOMBO"
-				echo command:
-				echo "openssl dgst -sha256 -binary $HASHCOMBO > $HASHCOMBO"_hashed""
-			fi
-		fi
-	else
-		HASH_BASE="$(basename -- $HASH)"
-		HASH_END=${HASH_BASE: -2}
-		PREVIOUS_HASHCOMBO=$HASHCOMBO"_hashed"
-		HASHCOMBO=$HASHCOMBO"_"$HASH_END
-		cat $PREVIOUS_HASHCOMBO $HASH > $HASHCOMBO
-		openssl dgst -sha256 -binary $HASHCOMBO > $HASHCOMBO"_hashed"
-		if [ $TEST = true ];then
-			echo command:
-			echo "cat $PREVIOUS_HASHCOMBO $HASH > $HASHCOMBO"
-			echo command:
-			echo "openssl dgst -sha256 -binary $HASHCOMBO > $HASHCOMBO"_hashed""
-		fi
-	fi
-done
-TREEHASH_START=$(openssl dgst -sha256 $HASHCOMBO)
-TREEHASH=$(cut -d " " -f2 <<< "$TREEHASH_START")
-echo $TREEHASH
 
+combine_then_hash () {
+	# combine_then_hash left_hash right_hash destination_folder
+	HASH1_BASE="$(basename -- $1)"
+	HASH2_END=$(sed 's/.*hash\(.*\)/\1/' <<< $2)
+	DESTINATION=$3/$HASH1_BASE"_"$HASH2_END
+	cat $1 $2 | openssl dgst -sha256 -binary > $DESTINATION
+	if [ $TEST = true ]; then
+		echo command:
+		echo "cat $1 $2 | openssl dgst -sha256 -binary > $DESTINATION"
+	fi
+}
+
+combine_hash_directory () {
+	# combine_hash_directory HASH_DIR
+	HASH_FILES=($1/*)
+	echo "HASH FILES: ${HASH_FILES[*]}"
+	FILE_NUM=${#HASH_FILES[@]}
+	echo "Num files: $FILE_NUM"
+	if [ $FILE_NUM = 1 ]; then
+		return 125
+	fi
+	if [ $((FILE_NUM%2)) -eq 1 ]; then
+		mv ${HASH_FILES[-1]} $LEAF_DIRECTORY
+		let "FILE_NUM-=1"
+	fi
+
+	for (( INDEX=0; INDEX<$FILE_NUM; INDEX+=2 )); do
+		let "SECOND_INDEX=$INDEX+1"
+		combine_then_hash ${HASH_FILES[$INDEX]} ${HASH_FILES[$SECOND_INDEX]} $LEAF_DIRECTORY
+	done
+}
+TREELEVEL=1
+LEAF_DIRECTORY=$FILE_COMBINED_HASH_FOLDER/$TREELEVEL
+mkdir $LEAF_DIRECTORY
+combine_hash_directory $FILE_HASH_FOLDER
+EXIT_STATUS=$?
+let "TREELEVEL+=1"
+
+while [ $EXIT_STATUS -eq 0 ]; do
+	FINAL_DIR=$PREVIOUS_LEAF_DIRECTORY
+	PREVIOUS_LEAF_DIRECTORY=$LEAF_DIRECTORY
+	LEAF_DIRECTORY=$FILE_COMBINED_HASH_FOLDER/$TREELEVEL
+	mkdir $LEAF_DIRECTORY
+	combine_hash_directory $PREVIOUS_LEAF_DIRECTORY
+	EXIT_STATUS=$?
+	let "TREELEVEL+=1"
+done
+
+HASH_FILES=($FINAL_DIR/*)
+if [ $TEST = true ]; then
+	echo command:
+	echo "cat ${HASH_FILES[0]} ${HASH_FILES[1]} | openssl dgst -sha256"
+fi
+TREEHASH_START=$(cat ${HASH_FILES[0]} ${HASH_FILES[1]} | openssl dgst -sha256)
+TREEHASH=$(cut -d " " -f 2 <<< "$TREEHASH_START")
+
+####################
 # complete upload
+####################
 echo "Completing upload with combined hashes"
 if [ $TEST = true ];then
 	echo command:
@@ -124,10 +159,12 @@ else
 	aws glacier complete-multipart-upload --checksum $TREEHASH --archive-size $CHUNK_END --upload-id $UPLOADID --account-id - --vault-name $VAULT
 fi
 
+####################
 # remove hash and chunk files
+####################
 echo "Cleaning up and deleting files"
 if [ $TEST = false ];then
 	rm -r $FILE_CHUNK_FOLDER
 	rm -r $FILE_HASH_FOLDER
 fi
-rm -r $FILE_COMBINED_HASH_FOLDER
+# rm -r $FILE_COMBINED_HASH_FOLDER
