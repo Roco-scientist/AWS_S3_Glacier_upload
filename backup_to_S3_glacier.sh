@@ -101,29 +101,43 @@ combine_then_hash () {
 	echo $DESTINATION
 }
 
-# TODO fix below.  Needs to be a tree hash, not a sequential hash
-HASH_FILES=($FILE_HASH_FOLDER/chunk_hash*)
-for HASH in "${HASH_FILES[@]}"; do
-	if [ $HASH2 = "None" ]; then
-		if [ $HASH1 = "None" ]; then
-			HASH1=$HASH
-		else
-			HASH2=$HASH
-			PREVIOUS_HASHCOMBO=$(combine_then_hash $HASH1 $HASH2 $FILE_COMBINED_HASH_FOLDER)
-			if [ $TEST = true ];then
-				echo command:
-				echo "cat $HASH2 $HASH1 | openssl dgst -sha256 -binary > $PREVIOUS_HASHCOMBO"
-			fi
-		fi
-	else
-		PREVIOUS_HASHCOMBO=$(combine_then_hash $PREVIOUS_HASHCOMBO $HASH $FILE_COMBINED_HASH_FOLDER)
-		if [ $TEST = true ];then
-			echo command:
-			echo "cat $PREVIOUS_HASHCOMBO $HASH | openssl dgst -sha256 -binary  > $PREVIOUS_HASHCOMBO"
-		fi
+combine_hash_directory () {
+	# combine_hash_directory HASH_DIR
+	HASH_FILES=($1/*)
+	echo "HASH FILES: ${HASH_FILES[*]}"
+	FILE_NUM=${#HASH_FILES[@]}
+	echo "Num files: $FILE_NUM"
+	if [ $FILE_NUM = 1 ]; then
+		return 125
 	fi
+	if [ $((FILE_NUM%2)) -eq 1 ]; then
+		mv ${HASH_FILES[-1]} $LEAF_DIRECTORY
+		let "FILE_NUM-=1"
+	fi
+
+	for (( INDEX=0; INDEX<$FILE_NUM; INDEX+=2 )); do
+		let "SECOND_INDEX=$INDEX+1"
+		combine_then_hash ${HASH_FILES[$INDEX]} ${HASH_FILES[$SECOND_INDEX]} $LEAF_DIRECTORY
+	done
+}
+# TODO fix below.  Needs to be a tree hash, not a sequential hash
+TREELEVEL=1
+LEAF_DIRECTORY=$FILE_COMBINED_HASH_FOLDER/$TREELEVEL
+mkdir $LEAF_DIRECTORY
+combine_hash_directory $FILE_HASH_FOLDER
+EXIT_STATUS=$?
+let "TREELEVEL+=1"
+while [ $EXIT_STATUS -eq 0 ]; do
+	PREVIOUS_LEAF_DIRECTORY=$LEAF_DIRECTORY
+	LEAF_DIRECTORY=$FILE_COMBINED_HASH_FOLDER/$TREELEVEL
+	mkdir $LEAF_DIRECTORY
+	combine_hash_directory $PREVIOUS_LEAF_DIRECTORY
+	EXIT_STATUS=$?
+	let "TREELEVEL+=1"
 done
-TREEHASH_START=$(cat $PREVIOUS_HASHCOMBO $HASH | openssl dgst -sha256)
+
+HASH_FILES=$($PREVIOUS_LEAF_DIRECTORY/*)
+TREEHASH_START=$(cat ${HASH_FILES[0]} ${HASH_FILES[1]} | openssl dgst -sha256)
 TREEHASH=$(cut -d " " -f 2 <<< "$TREEHASH_START")
 echo $TREEHASH
 
