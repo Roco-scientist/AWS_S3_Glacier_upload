@@ -77,7 +77,7 @@ for FILE in $FILE_CHUNK_FOLDER/chunk*; do
 	printf -v PADDED_NUMBER "%02d" $NUMBER
 	if [ $TEST = true ];then
 	 	echo command:
-		# echo "openssl dgst -sha256 -binary $FILE > $FILE_HASH_FOLDER/chunk_hash$PADDED_NUMBER"
+		echo "openssl dgst -sha256 -binary $FILE > $FILE_HASH_FOLDER/chunk_hash$PADDED_NUMBER"
 	else
 		openssl dgst -sha256 -binary $FILE > $FILE_HASH_FOLDER/chunk_hash$PADDED_NUMBER
 	fi
@@ -98,7 +98,10 @@ combine_then_hash () {
 	HASH2_END=$(sed 's/.*hash\(.*\)/\1/' <<< $2)
 	DESTINATION=$3/$HASH1_BASE"_"$HASH2_END
 	cat $1 $2 | openssl dgst -sha256 -binary > $DESTINATION
-	echo $DESTINATION
+	if [ $TEST = true ]; then
+		echo command:
+		echo "cat $1 $2 | openssl dgst -sha256 -binary > $DESTINATION"
+	fi
 }
 
 combine_hash_directory () {
@@ -127,7 +130,9 @@ mkdir $LEAF_DIRECTORY
 combine_hash_directory $FILE_HASH_FOLDER
 EXIT_STATUS=$?
 let "TREELEVEL+=1"
+
 while [ $EXIT_STATUS -eq 0 ]; do
+	FINAL_DIR=$PREVIOUS_LEAF_DIRECTORY
 	PREVIOUS_LEAF_DIRECTORY=$LEAF_DIRECTORY
 	LEAF_DIRECTORY=$FILE_COMBINED_HASH_FOLDER/$TREELEVEL
 	mkdir $LEAF_DIRECTORY
@@ -136,10 +141,13 @@ while [ $EXIT_STATUS -eq 0 ]; do
 	let "TREELEVEL+=1"
 done
 
-HASH_FILES=$($PREVIOUS_LEAF_DIRECTORY/*)
+HASH_FILES=($FINAL_DIR/*)
+if [ $TEST = true ]; then
+	echo command:
+	echo "cat ${HASH_FILES[0]} ${HASH_FILES[1]} | openssl dgst -sha256"
+fi
 TREEHASH_START=$(cat ${HASH_FILES[0]} ${HASH_FILES[1]} | openssl dgst -sha256)
 TREEHASH=$(cut -d " " -f 2 <<< "$TREEHASH_START")
-echo $TREEHASH
 
 ####################
 # complete upload
