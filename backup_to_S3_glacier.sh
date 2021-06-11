@@ -123,7 +123,6 @@ combine_hash_directory () {
 		combine_then_hash ${HASH_FILES[$INDEX]} ${HASH_FILES[$SECOND_INDEX]} $LEAF_DIRECTORY
 	done
 }
-# TODO fix below.  Needs to be a tree hash, not a sequential hash
 TREELEVEL=1
 LEAF_DIRECTORY=$FILE_COMBINED_HASH_FOLDER/$TREELEVEL
 mkdir $LEAF_DIRECTORY
