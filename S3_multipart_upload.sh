@@ -12,7 +12,7 @@ TEST=false
 
 
 arg_info () {
-	echo "usage: S3_multipart_upload [-c|--chunk <size>] [-s|--storage-class <S3 class>] [-b|--bucket <S3 bucket>] [] [-i|--input <file>]"
+	echo "usage: S3_multipart_upload [-c|--chunk <size>] [-s|--storage-class <S3 class>] [-b|--bucket <S3 bucket>] [-i|--input <file>]"
 	echo ""
 	echo "Splits and uploads a file to S3"
 	echo ""
@@ -22,9 +22,9 @@ arg_info () {
 	echo "    			DEEP_ARCHIVE, OUTPOSTS [default=$STORAGE_CLASS]"
 	echo "    --bucket 		S3 bucket destination"
 	echo "    --input 		input file to be split and uploaded"
+	echo ""
 }
 
-arg_positional=()
 while [[ $# -gt 0 ]]; do
   key="$1"
 
@@ -121,7 +121,7 @@ if [ $TEST = false ];then
 fi
 
 ####################
-# remove hash and chunk files
+# remove chunk files
 ####################
 echo "Cleaning up and deleting files"
 if [ $TEST = false ];then

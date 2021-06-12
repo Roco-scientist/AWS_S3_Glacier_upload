@@ -1,12 +1,10 @@
 #!/bin/bash
 
-
 ####################
 # Variables to change
 ####################
 CHUNK_SIZE=1073741824
 FILE_HASH_FOLDER=/tmp/hash_files
-FILE_COMBINED_HASH_FOLDER=/tmp/hashed_files_combined
 FILE_CHUNK_FOLDER=/tmp/chunked_files
 VAULT=pictures.backup
 ARCHIVE_DESCRIPTION='"Backup of pictures"' 
@@ -15,10 +13,20 @@ ARCHIVE_FILE=/media/main/pictures.tar
 TEST=true
 NOT_ALREADY_SPLIT=false
 NOT_TARRED=false
+CHUNK_ID=chunk
+
+
+####################
+# Setup directories
+####################
+
+mkdir $FILE_CHUNK_FOLDER
+mkdir $FILE_HASH_FOLDER
 
 ####################
 # tar archive pictures
 ####################
+
 if [ $TEST = true ];then
 	echo command:
 	echo tar -cf $ARCHIVE_FILE $ARCHIVE_FOLDER 
@@ -30,21 +38,20 @@ fi
 ####################
 # split into chunks
 ####################
+
 echo "Splitting file into $CHUNK_SIZE byte chunks"
-mkdir $FILE_CHUNK_FOLDER
-mkdir $FILE_HASH_FOLDER
-mkdir $FILE_COMBINED_HASH_FOLDER
 if [ $TEST = true ];then
 	echo command:
-	echo split -b $CHUNK_SIZE --verbose $ARCHIVE_FILE $FILE_CHUNK_FOLDER/chunk
+	echo split -b $CHUNK_SIZE --verbose $ARCHIVE_FILE $FILE_CHUNK_FOLDER/$CHUNK_ID
 fi
 if [ $NOT_ALREADY_SPLIT = true ];then
-	split -b $CHUNK_SIZE --verbose $ARCHIVE_FILE $FILE_CHUNK_FOLDER/chunk
+	split -b $CHUNK_SIZE --verbose $ARCHIVE_FILE $FILE_CHUNK_FOLDER/$CHUNK_ID
 fi
 
 ####################
-# initiate multipart upload
+# initiate multipart upload on S3 glacier
 ####################
+
 if [ $TEST = true ];then
 	echo command:
 	echo aws glacier initiate-multipart-upload --account-id - --archive-description $ARCHIVE_DESCRIPTION --part-size $CHUNK_SIZE --vault-name $VAULT
@@ -57,11 +64,12 @@ UPLOADID=""
 ####################
 # upload chunked files and hash
 ####################
+
 echo "Uploading and hashing files"
 CHUNK_START=0
 CHUNK_END=0
 NUMBER=1
-for FILE in $FILE_CHUNK_FOLDER/chunk*; do
+for FILE in $FILE_CHUNK_FOLDER/$CHUNK_ID*; do
 	FILESIZE=$(stat -c%s "$FILE")
 	CHUNK_START=$CHUNK_END
 	if [ $CHUNK_START != 0 ];then
@@ -77,10 +85,11 @@ for FILE in $FILE_CHUNK_FOLDER/chunk*; do
 	printf -v PADDED_NUMBER "%02d" $NUMBER
 	if [ $TEST = true ];then
 	 	echo command:
-		echo "openssl dgst -sha256 -binary $FILE > $FILE_HASH_FOLDER/chunk_hash$PADDED_NUMBER"
-	else
-		openssl dgst -sha256 -binary $FILE > $FILE_HASH_FOLDER/chunk_hash$PADDED_NUMBER
+		echo "openssl dgst -sha256 -binary $FILE > $FILE_HASH_FOLDER/$CHUNK_ID"_hash"$PADDED_NUMBER"
+	# else
+	# 	openssl dgst -sha256 -binary $FILE > $FILE_HASH_FOLDER/$CHUNK_ID"_hash"$PADDED_NUMBER
 	fi
+	openssl dgst -sha256 -binary $FILE > $FILE_HASH_FOLDER/$CHUNK_ID"_hash"$PADDED_NUMBER
 	let "NUMBER+=1"
 done
 
@@ -106,7 +115,7 @@ combine_then_hash () {
 
 combine_hash_directory () {
 	# combine_hash_directory HASH_DIR
-	HASH_FILES=($1/*)
+	HASH_FILES=($1/$CHUNK_ID*)
 	echo "HASH FILES: ${HASH_FILES[*]}"
 	FILE_NUM=${#HASH_FILES[@]}
 	echo "Num files: $FILE_NUM"
@@ -124,7 +133,7 @@ combine_hash_directory () {
 	done
 }
 TREELEVEL=1
-LEAF_DIRECTORY=$FILE_COMBINED_HASH_FOLDER/$TREELEVEL
+LEAF_DIRECTORY=$FILE_HASH_FOLDER/$TREELEVEL
 mkdir $LEAF_DIRECTORY
 combine_hash_directory $FILE_HASH_FOLDER
 EXIT_STATUS=$?
@@ -133,7 +142,7 @@ let "TREELEVEL+=1"
 while [ $EXIT_STATUS -eq 0 ]; do
 	FINAL_DIR=$PREVIOUS_LEAF_DIRECTORY
 	PREVIOUS_LEAF_DIRECTORY=$LEAF_DIRECTORY
-	LEAF_DIRECTORY=$FILE_COMBINED_HASH_FOLDER/$TREELEVEL
+	LEAF_DIRECTORY=$FILE_HASH_FOLDER/$TREELEVEL
 	mkdir $LEAF_DIRECTORY
 	combine_hash_directory $PREVIOUS_LEAF_DIRECTORY
 	EXIT_STATUS=$?
@@ -167,4 +176,3 @@ if [ $TEST = false ];then
 	rm -r $FILE_CHUNK_FOLDER
 	rm -r $FILE_HASH_FOLDER
 fi
-# rm -r $FILE_COMBINED_HASH_FOLDER
