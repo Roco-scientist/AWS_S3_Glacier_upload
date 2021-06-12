@@ -3,6 +3,7 @@
 ####################
 # Variables to change
 ####################
+
 CHUNK_SIZE=1073741824
 FILE_HASH_FOLDER=/tmp/hash_files
 FILE_CHUNK_FOLDER=/tmp/chunked_files
@@ -15,6 +16,52 @@ NOT_ALREADY_SPLIT=false
 NOT_TARRED=false
 CHUNK_ID=chunk
 
+arg_info () {
+	echo "usage: backup_to_S3_glacier [-c|--chunk <size>] [-v|--vault <S3 Glacier vault>] [-d|--description] [-i|--input <file>]"
+	echo ""
+	echo "Splits and uploads a file to S3 Glacier"
+	echo ""
+	echo "    --chunk 		byte size of splits to upload to S3 [default=$CHUNK_SIZE]"
+	echo "    --vault 		S3 bucket destination [default=$VAULT]"
+	echo "    --description 	Archive description"
+	echo "    --input 		input file to be split and uploaded"
+	echo ""
+}
+
+while [[ $# -gt 0 ]]; do
+  key="$1"
+
+  case $key in
+      -h|--help)
+      arg_info
+      exit 0
+      ;;
+      -c|--chunk)
+      CHUNK_SIZE="$2"
+      shift # past argument
+      shift # past value
+      ;;
+      -b|--bucket)
+      VAULT="$2"
+      shift # past argument
+      shift # past value
+      ;;
+      -d|--description)
+      ARCHIVE_DESCRIPTION="$2"
+      shift # past argument
+      shift # past value
+      ;;
+      -i|--input)
+      ARCHIVE_FILE="$2"
+      shift # past argument
+      shift # past value
+      ;;
+  esac
+done
+
+if [ -z "$ARCHIVE_FILE" ];then echo "--input required";exit 1; fi
+if [ ! -f "$ARCHIVE_FILE" ];then echo "input file does not exist";exit 1; fi
+if [ -z "$VAULT" ];then echo "--vault required";exit 1; fi
 
 ####################
 # Setup directories
@@ -52,14 +99,13 @@ fi
 # initiate multipart upload on S3 glacier
 ####################
 
-if [ $TEST = true ];then
-	echo command:
-	echo aws glacier initiate-multipart-upload --account-id - --archive-description $ARCHIVE_DESCRIPTION --part-size $CHUNK_SIZE --vault-name $VAULT
+echo aws glacier initiate-multipart-upload --account-id - --archive-description $ARCHIVE_DESCRIPTION --part-size $CHUNK_SIZE --vault-name $VAULT
+if [ $TEST = false ];then
+	UPLOADID=$(aws glacier initiate-multipart-upload --account-id - --archive-description $ARCHIVE_DESCRIPTION --part-size $CHUNK_SIZE --vault-name $VAULT | grep UploadId | sed 's/.*UploadId\"\: //' | sed 's/\"//g')
 else
-	aws glacier initiate-multipart-upload --account-id - --archive-description $ARCHIVE_DESCRIPTION --part-size $CHUNK_SIZE --vault-name $VAULT
+	UPLOADID=""
 fi
 
-UPLOADID=""
 
 ####################
 # upload chunked files and hash
@@ -76,26 +122,22 @@ for FILE in $FILE_CHUNK_FOLDER/$CHUNK_ID*; do
 		let "CHUNK_START+=1"
 	fi
 	let "CHUNK_END=$CHUNK_START+$FILESIZE"
-	if [ $TEST = true ];then
-		echo command:
-		echo aws glacier upload-multipart-part --upload-id $UPLOADID --body $FILE --range "bytes $CHUNK_START-$CHUNK_END/*" --account-id - --vault-name $VAULT 
-	else
+	echo aws glacier upload-multipart-part --upload-id $UPLOADID --body $FILE --range "bytes $CHUNK_START-$CHUNK_END/*" --account-id - --vault-name $VAULT 
+	if [ $TEST = false ];then
 		aws glacier upload-multipart-part --upload-id $UPLOADID --body $FILE --range "bytes $CHUNK_START-$CHUNK_END/*" --account-id - --vault-name $VAULT 
 	fi
 	printf -v PADDED_NUMBER "%02d" $NUMBER
-	if [ $TEST = true ];then
-	 	echo command:
-		echo "openssl dgst -sha256 -binary $FILE > $FILE_HASH_FOLDER/$CHUNK_ID"_hash"$PADDED_NUMBER"
-	# else
-	# 	openssl dgst -sha256 -binary $FILE > $FILE_HASH_FOLDER/$CHUNK_ID"_hash"$PADDED_NUMBER
+	echo "openssl dgst -sha256 -binary $FILE > $FILE_HASH_FOLDER/$CHUNK_ID"_hash"$PADDED_NUMBER"
+	if [ $TEST = false ];then
+		openssl dgst -sha256 -binary $FILE > $FILE_HASH_FOLDER/$CHUNK_ID"_hash"$PADDED_NUMBER
 	fi
-	openssl dgst -sha256 -binary $FILE > $FILE_HASH_FOLDER/$CHUNK_ID"_hash"$PADDED_NUMBER
 	let "NUMBER+=1"
 done
 
 ####################
 # combine hashes
 ####################
+
 echo "Combining hashes"
 HASH1="None"
 HASH2="None"
@@ -107,16 +149,12 @@ combine_then_hash () {
 	HASH2_END=$(sed 's/.*hash\(.*\)/\1/' <<< $2)
 	DESTINATION=$3/$HASH1_BASE"_"$HASH2_END
 	cat $1 $2 | openssl dgst -sha256 -binary > $DESTINATION
-	if [ $TEST = true ]; then
-		echo command:
-		echo "cat $1 $2 | openssl dgst -sha256 -binary > $DESTINATION"
-	fi
+	echo "cat $1 $2 | openssl dgst -sha256 -binary > $DESTINATION"
 }
 
 combine_hash_directory () {
 	# combine_hash_directory HASH_DIR
 	HASH_FILES=($1/$CHUNK_ID*)
-	echo "HASH FILES: ${HASH_FILES[*]}"
 	FILE_NUM=${#HASH_FILES[@]}
 	echo "Num files: $FILE_NUM"
 	if [ $FILE_NUM = 1 ]; then
@@ -150,27 +188,24 @@ while [ $EXIT_STATUS -eq 0 ]; do
 done
 
 HASH_FILES=($FINAL_DIR/*)
-if [ $TEST = true ]; then
-	echo command:
-	echo "cat ${HASH_FILES[0]} ${HASH_FILES[1]} | openssl dgst -sha256"
-fi
+echo "cat ${HASH_FILES[0]} ${HASH_FILES[1]} | openssl dgst -sha256"
 TREEHASH_START=$(cat ${HASH_FILES[0]} ${HASH_FILES[1]} | openssl dgst -sha256)
 TREEHASH=$(cut -d " " -f 2 <<< "$TREEHASH_START")
 
 ####################
 # complete upload
 ####################
+
 echo "Completing upload with combined hashes"
-if [ $TEST = true ];then
-	echo command:
-	echo aws glacier complete-multipart-upload --checksum $TREEHASH --archive-size $CHUNK_END --upload-id $UPLOADID --account-id - --vault-name $VAULT
-else
+echo aws glacier complete-multipart-upload --checksum $TREEHASH --archive-size $CHUNK_END --upload-id $UPLOADID --account-id - --vault-name $VAULT
+if [ $TEST = false ];then
 	aws glacier complete-multipart-upload --checksum $TREEHASH --archive-size $CHUNK_END --upload-id $UPLOADID --account-id - --vault-name $VAULT
 fi
 
 ####################
 # remove hash and chunk files
 ####################
+
 echo "Cleaning up and deleting files"
 if [ $TEST = false ];then
 	rm -r $FILE_CHUNK_FOLDER
