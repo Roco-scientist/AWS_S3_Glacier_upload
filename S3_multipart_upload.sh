@@ -4,7 +4,7 @@
 # Variables to change
 ####################
 
-CHUNK_SIZE=10485760
+CHUNK_SIZE=262144000
 STORAGE_CLASS=STANDARD
 FILE_CHUNK_FOLDER=/tmp/split
 CHUNK_ID=chunk
@@ -72,15 +72,16 @@ mkdir $FILE_CHUNK_FOLDER
 
 echo "Splitting file into $CHUNK_SIZE byte chunks"
 echo split -b $CHUNK_SIZE --verbose $UPLOAD_FILE $FILE_CHUNK_FOLDER/$CHUNK_ID
-split -b $CHUNK_SIZE --verbose $UPLOAD_FILE $FILE_CHUNK_FOLDER/$CHUNK_ID
+# split -b $CHUNK_SIZE --verbose $UPLOAD_FILE $FILE_CHUNK_FOLDER/$CHUNK_ID
 
 ####################
 # initiate multipart upload on S3 glacier
 ####################
 
-echo aws s3api create-multipart-upload --storage-class $STORAGE_CLASS --key $UPLOAD_FILE --bucket $BUCKET
+KEY="$(basename -- $UPLOAD_FILE)"
+echo aws s3api create-multipart-upload --storage-class $STORAGE_CLASS --key $KEY --bucket $BUCKET
 if [ $TEST = false ];then
-	UPLOADID=$(aws s3api create-multipart-upload --storage-class $STORAGE_CLASS --key $UPLOAD_FILE --bucket $BUCKET | grep UploadId | sed 's/.*UploadId\"\: //' | sed 's/\"//g')
+	UPLOADID=$(aws s3api create-multipart-upload --storage-class $STORAGE_CLASS --key $KEY --bucket $BUCKET | grep UploadId | sed 's/.*UploadId\"\: //' | sed 's/\"//g')
 else
 	UPLOADID=""
 fi
@@ -98,9 +99,9 @@ for FILE in $FILE_CHUNK_FOLDER/$CHUNK_ID*; do
 	if [ $NUMBER -ge 2 ]; then
 		echo "," >> mpustruct
 	fi
-	echo aws s3api upload-part --body $FILE --key $UPLOAD_FILE --part-number $NUMBER --upload-id $UPLOADID --bucket $BUCKET
+	echo aws s3api upload-part --body $FILE --key $KEY --part-number $NUMBER --upload-id $UPLOADID --bucket $BUCKET
 	if [ $TEST = false ];then
-		ETAG=$(aws s3api upload-part --body $FILE --key $UPLOAD_FILE --part-number $NUMBER --upload-id $UPLOADID --bucket $BUCKET | grep ETag | sed 's/.*ETag\": //' | sed 's/\\"//g' | sed 's/\"//g')
+		ETAG=$(aws s3api upload-part --body $FILE --key $KEY --part-number $NUMBER --upload-id $UPLOADID --bucket $BUCKET | grep ETag | sed 's/.*ETag\": //' | sed 's/\\"//g' | sed 's/\"//g')
 	fi
 	echo "{" >> mpustruct
 	echo "\"ETag\": \"$ETAG\"," >> mpustruct
@@ -115,9 +116,9 @@ echo "]}" >> mpustruct
 ####################
 
 echo "Completing upload"
-echo aws s3api complete-multipart-upload --bucket $BUCKET --key $UPLOAD_FILE --upload-id $UPLOADID
+echo aws s3api complete-multipart-upload --bucket $BUCKET --key $KEY --upload-id $UPLOADID
 if [ $TEST = false ];then
-	aws s3api complete-multipart-upload --bucket $BUCKET --key $UPLOAD_FILE --upload-id $UPLOADID --multipart-upload file://mpustruct
+	aws s3api complete-multipart-upload --bucket $BUCKET --key $KEY --upload-id $UPLOADID --multipart-upload file://mpustruct
 fi
 
 ####################
