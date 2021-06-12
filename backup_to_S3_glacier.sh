@@ -17,7 +17,7 @@ NOT_TARRED=false
 CHUNK_ID=chunk
 
 arg_info () {
-	echo "usage: backup_to_S3_glacier [-c|--chunk <size>] [-v|--vault <S3 Glacier vault>] [-d|--description] [-i|--input <file>]"
+	echo "usage: backup_to_S3_glacier [-c|--chunk <size>] [-v|--vault <S3 Glacier vault>] [-d|--description <File description>] [-i|--input <file>]"
 	echo ""
 	echo "Splits and uploads a file to S3 Glacier"
 	echo ""
