@@ -1,15 +1,20 @@
 #!/bin/bash
 
+set -e # exit if any commands fail
+
 ####################
 # Variables to change
 ####################
 
-CHUNK_SIZE=262144000
-STORAGE_CLASS=STANDARD
-FILE_CHUNK_FOLDER=/tmp/split
-CHUNK_ID=chunk
-TEST=false
+CHUNK_SIZE=262144000 # default to 250mb chunks
+STORAGE_CLASS=STANDARD # default to standard storage class
+FILE_CHUNK_FOLDER=/tmp/split # folder file is split into
+CHUNK_ID=chunk # prefix for split files.  this disappears and is unimportant
+TEST=false # set to true if the code wants to be checked before uploading
 
+####################
+# Argument variables
+####################
 
 arg_info () {
 	echo "usage: S3_multipart_upload [-c|--chunk <size>] [-s|--storage-class <S3 class>] [-b|--bucket <S3 bucket>] [-i|--input <file>]"
@@ -25,10 +30,10 @@ arg_info () {
 	echo ""
 }
 
-while [[ $# -gt 0 ]]; do
-  key="$1"
+while [[ $# -gt 0 ]]; do # while there are more than 0 arguments left
+  KEY="$1" # assign the argument to key
 
-  case $key in
+  case $KEY in # if key is in any of the following, set the variable
       -h|--help)
       arg_info
       exit 0
@@ -56,9 +61,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [ -z "$UPLOAD_FILE" ];then echo "--input required";exit 1; fi
-if [ ! -f "$UPLOAD_FILE" ];then echo "input file does not exist";exit 1; fi
-if [ -z "$BUCKET" ];then echo "--bucket required";exit 1; fi
+if [ -z "$UPLOAD_FILE" ];then echo "--input required";exit 1; fi # if UPLOAD_FILE is empty, exit
+if [ ! -f "$UPLOAD_FILE" ];then echo "input file does not exist";exit 1; fi # if UPLOAD_FILE is not a file, exit
+if [ -z "$BUCKET" ];then echo "--bucket required";exit 1; fi  # if BUCKET is empty, exit
 
 ####################
 # Setup directories
@@ -72,16 +77,17 @@ mkdir $FILE_CHUNK_FOLDER
 
 echo "Splitting file into $CHUNK_SIZE byte chunks"
 echo split -b $CHUNK_SIZE --verbose $UPLOAD_FILE $FILE_CHUNK_FOLDER/$CHUNK_ID
-# split -b $CHUNK_SIZE --verbose $UPLOAD_FILE $FILE_CHUNK_FOLDER/$CHUNK_ID
+split -b $CHUNK_SIZE --verbose $UPLOAD_FILE $FILE_CHUNK_FOLDER/$CHUNK_ID
 
 ####################
 # initiate multipart upload on S3 glacier
 ####################
 
-KEY="$(basename -- $UPLOAD_FILE)"
-echo aws s3api create-multipart-upload --storage-class $STORAGE_CLASS --key $KEY --bucket $BUCKET
+FILENAME="$(basename -- $UPLOAD_FILE)" # Give the S3 file the same name as the split file
+echo aws s3api create-multipart-upload --storage-class $STORAGE_CLASS --key $FILENAME --bucket $BUCKET
 if [ $TEST = false ];then
-	UPLOADID=$(aws s3api create-multipart-upload --storage-class $STORAGE_CLASS --key $KEY --bucket $BUCKET | grep UploadId | sed 's/.*UploadId\"\: //' | sed 's/\"//g')
+	# upload-id is returned within a JSON by the create-multipart-upload-command.  Need to capture that for the other commands
+	UPLOADID=$(aws s3api create-multipart-upload --storage-class $STORAGE_CLASS --key $FILENAME --bucket $BUCKET | grep UploadId | sed 's/.*UploadId\"\: //' | sed 's/\"//g')
 else
 	UPLOADID=""
 fi
@@ -94,31 +100,35 @@ echo "Uploading"
 CHUNK_START=0
 CHUNK_END=0
 NUMBER=1
+# Create the JSON mpustruct file, which is used to associate parts to etags when the upload is finalized to check for non-corrupt uploads
 echo "{\"Parts\": [" > mpustruct
+# Upload each split file
 for FILE in $FILE_CHUNK_FOLDER/$CHUNK_ID*; do
 	if [ $NUMBER -ge 2 ]; then
 		echo "," >> mpustruct
 	fi
-	echo aws s3api upload-part --body $FILE --key $KEY --part-number $NUMBER --upload-id $UPLOADID --bucket $BUCKET
+	echo aws s3api upload-part --body $FILE --key $FILENAME --part-number $NUMBER --upload-id $UPLOADID --bucket $BUCKET
 	if [ $TEST = false ];then
-		ETAG=$(aws s3api upload-part --body $FILE --key $KEY --part-number $NUMBER --upload-id $UPLOADID --bucket $BUCKET | grep ETag | sed 's/.*ETag\": //' | sed 's/\\"//g' | sed 's/\"//g')
+		# the etag is returned by the upload-part command.  This needs to be captured and put into the mpustruct file
+		ETAG=$(aws s3api upload-part --body $FILE --key $FILENAME --part-number $NUMBER --upload-id $UPLOADID --bucket $BUCKET | grep ETag | sed 's/.*ETag\": //' | sed 's/\\"//g' | sed 's/\"//g')
 	fi
+	# Add the JSON elements to mpustruct informing ETag and PartNumber for the part upload
 	echo "{" >> mpustruct
 	echo "\"ETag\": \"$ETAG\"," >> mpustruct
 	echo "\"PartNumber\": $NUMBER" >> mpustruct
 	echo "}" >> mpustruct
 	let "NUMBER+=1"
 done
-echo "]}" >> mpustruct
+echo "]}" >> mpustruct # Finalise the mpustruct JSON
 
 ####################
 # complete upload
 ####################
 
 echo "Completing upload"
-echo aws s3api complete-multipart-upload --bucket $BUCKET --key $KEY --upload-id $UPLOADID
+echo aws s3api complete-multipart-upload --bucket $BUCKET --key $FILENAME --upload-id $UPLOADID
 if [ $TEST = false ];then
-	aws s3api complete-multipart-upload --bucket $BUCKET --key $KEY --upload-id $UPLOADID --multipart-upload file://mpustruct
+	aws s3api complete-multipart-upload --bucket $BUCKET --key $FILENAME --upload-id $UPLOADID --multipart-upload file://mpustruct
 fi
 
 ####################
